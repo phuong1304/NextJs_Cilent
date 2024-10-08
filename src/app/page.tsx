@@ -1,101 +1,241 @@
-import Image from "next/image";
+"use client";
+
+import React, { useState } from "react";
+import {
+  useForm,
+  SubmitHandler,
+  FormProvider,
+  Controller,
+} from "react-hook-form";
+import { yupResolver } from "@hookform/resolvers/yup";
+import * as yup from "yup";
+import moment from "moment";
+import {
+  FormItem,
+  FormLabel,
+  FormControl,
+  FormMessage,
+} from "@/components/ui/form";
+import UploadFile from "@/components/UploadFile";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+interface IFormInputs {
+  startTime: string;
+  endTime: string;
+}
+
+interface Transaction {
+  date: string;
+  time: string;
+  amount: number;
+}
+
+const schema = yup.object().shape({
+  startTime: yup.string().required("Bắt buộc chọn giờ bắt đầu"),
+  endTime: yup.string().required("Bắt buộc chọn giờ kết thúc"),
+});
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing Phương nè{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const methods = useForm<IFormInputs>({
+    resolver: yupResolver(schema),
+    defaultValues: {
+      startTime: "",
+      endTime: "",
+    },
+  });
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  const [data, setData] = useState<Transaction[]>([]);
+  const [totalAmount, setTotalAmount] = useState<number | null>(null);
+  const [uniqueDates, setUniqueDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>("");
+
+  const handleDataExtracted = (
+    extractedData: (string | number | undefined)[][]
+  ) => {
+    const startRowIndex = extractedData.findIndex((row) => {
+      return (
+        row.includes("Ngày") &&
+        row.includes("Giờ") &&
+        row.includes("Thành tiền (VNĐ)")
+      );
+    });
+
+    if (startRowIndex === -1) {
+      alert(
+        "Kiểm tra lại file của bạn, có thể nó đã sai định dạng file mẫu cho phép"
+      );
+      return;
+    }
+
+    const headers = extractedData[startRowIndex] as string[];
+    const timeIndex = headers.indexOf("Giờ");
+    const amountIndex = headers.indexOf("Thành tiền (VNĐ)");
+
+    const dateIndex = headers.indexOf("Ngày");
+    // Lấy ngày đầu tiên từ cột "Ngày" sau hàng tiêu đề
+    const transactions = extractedData
+      .slice(startRowIndex + 1)
+      .map((row) => {
+        const dateStr =
+          typeof row[dateIndex] === "string" ? row[dateIndex].trim() : "";
+        const timeValue = row[timeIndex];
+        let timeStr = "";
+        let amount = 0;
+
+        // Chuyển đổi thời gian nếu là số thập phân
+        if (typeof timeValue === "number") {
+          const totalMinutes = timeValue * 24 * 60;
+          const hours = Math.floor(totalMinutes / 60);
+          const minutes = Math.floor(totalMinutes % 60);
+          const seconds = Math.round((totalMinutes * 60) % 60);
+          timeStr = moment({
+            hour: hours,
+            minute: minutes,
+            second: seconds,
+          }).format("HH:mm:ss");
+        } else if (typeof timeValue === "string") {
+          timeStr = timeValue.trim();
+        }
+
+        if (typeof row[amountIndex] === "number") {
+          amount = row[amountIndex];
+        } else if (typeof row[amountIndex] === "string") {
+          amount = parseFloat(row[amountIndex].replace(/,/g, ""));
+        }
+
+        if (dateStr && timeStr && !isNaN(amount)) {
+          return { date: dateStr, time: timeStr, amount };
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    const dates = Array.from(
+      new Set(transactions.map((item) => item?.date))
+    ).filter((date): date is string => date !== undefined);
+    setUniqueDates(dates);
+    setData(transactions as Transaction[]);
+  };
+
+  const onSubmit: SubmitHandler<IFormInputs> = (values) => {
+    const dateToUse = uniqueDates.length === 1 ? uniqueDates[0] : selectedDate;
+
+    if (!dateToUse) {
+      alert("Vui lòng chọn ngày!");
+      return;
+    }
+
+    const start = moment(
+      `${dateToUse} ${values.startTime}`,
+      "DD/MM/YYYY HH:mm"
+    );
+    const end = moment(`${dateToUse} ${values.endTime}`, "DD/MM/YYYY HH:mm");
+
+    if (!start.isValid() || !end.isValid()) {
+      alert("Thời gian không hợp lệ!");
+      return;
+    }
+
+    const filteredData = data.filter((item) => {
+      const dateTimeStr = `${item.date} ${item.time}`;
+      const dateTime = moment(dateTimeStr, [
+        "DD/MM/YYYY hh:mm:ss A",
+        "DD/MM/YYYY HH:mm:ss",
+      ]);
+      return dateTime.isBetween(start, end, null, "[)");
+    });
+
+    const total = filteredData.reduce((acc, curr) => acc + curr.amount, 0);
+    setTotalAmount(total);
+  };
+
+  return (
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Data Report</h1>
+      <UploadFile onDataExtracted={handleDataExtracted} />
+
+      {uniqueDates.length > 0 && (
+        <FormProvider {...methods}>
+          <form
+            onSubmit={methods.handleSubmit(onSubmit)}
+            className="space-y-4 mt-4"
           >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+            {uniqueDates.length === 1 ? (
+              <h2 className="text-lg">
+                Trong file là doanh số trong ngày: {uniqueDates[0]}
+              </h2>
+            ) : (
+              <div className="mb-4">
+                <h2 className="text-lg">
+                  Trong file là doanh số trong ngày: {uniqueDates.join(", ")}
+                </h2>
+                <label htmlFor="date-select" className="block font-medium">
+                  Chọn ngày
+                </label>
+                <Select onValueChange={setSelectedDate} value={selectedDate}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Chọn ngày" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uniqueDates.map((date) => (
+                      <SelectItem key={date} value={date}>
+                        {date}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <Controller
+              name="startTime"
+              control={methods.control}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Giờ bắt đầu</FormLabel>
+                  <FormControl>
+                    <input type="time" {...field} className="input" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+
+            <Controller
+              name="endTime"
+              control={methods.control}
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Giờ kết thúc</FormLabel>
+                  <FormControl>
+                    <input type="time" {...field} className="input" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <Button type="submit" variant="default">
+              Truy vấn
+            </Button>
+          </form>
+        </FormProvider>
+      )}
+
+      {totalAmount !== null && (
+        <div className="mt-4">
+          <h2 className="text-xl">
+            Tổng Thành Tiền: {totalAmount.toLocaleString()} VND
+          </h2>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      )}
     </div>
   );
 }
